@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>J.A.R.V.I.S. — Neural HUD</title>
+
+  <style>
+    :root {
+      --cyan: #00e5ff;
+      --cyan-soft: rgba(0, 229, 255, 0.32);
+      --cyan-dim: rgba(0, 229, 255, 0.08);
+      --panel: rgba(1, 13, 27, 0.80);
+      --green: #60ff94;
+      --yellow: #ffd452;
+      --red: #ff315c;
+      --white: #e8fdff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #010711;
+      color: var(--cyan);
+      font-family: Consolas, "Courier New", monospace;
+      user-select: none;
+    }
+
+    canvas.webgl {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      display: block;
+    }
+
+    #background {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 50% 48%, rgba(0,229,255,0.15), transparent 22%),
+        radial-gradient(circle at 50% 48%, rgba(0,80,255,0.10), transparent 48%),
+        linear-gradient(rgba(0,229,255,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.035) 1px, transparent 1px),
+        linear-gradient(140deg, #03121f 0%, #01050c 65%, #031725 100%);
+      background-size: 100% 100%, 100% 100%, 46px 46px, 46px 46px, 100% 100%;
+    }
+
+    #scanline {
+      position: fixed;
+      top: -4%;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      z-index: 5;
+      pointer-events: none;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(0,229,255,0.65),
+        transparent
+      );
+      box-shadow: 0 0 18px rgba(0,229,255,0.75);
+      animation: scan 5s linear infinite;
+    }
+
+    @keyframes scan {
+      from { top: -4%; }
+      to { top: 105%; }
+    }
+
+    #vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 4;
+      pointer-events: none;
+      background: radial-gradient(
+        ellipse at center,
+        transparent 45%,
+        rgba(0,0,0,0.20) 72%,
+        rgba(0,0,0,0.74) 100%
+      );
+    }
+
+    #reticle {
+      position: fixed;
+      z-index: 4;
+      width: 525px;
+      height: 525px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border: 1px dashed rgba(0,229,255,0.20);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    #reticle::before,
+    #reticle::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      background: rgba(0,229,255,0.22);
+      transform: translate(-50%, -50%);
+    }
+
+    #reticle::before { width: 100%; height: 1px; }
+    #reticle::after { width: 1px; height: 100%; }
+
+    .panel {
+      position: fixed;
+      z-index: 10;
+      overflow: hidden;
+      padding: 14px;
+      border: 1px solid var(--cyan-soft);
+      background: var(--panel);
+      box-shadow:
+        0 0 18px rgba(0,229,255,0.14),
+        inset 0 0 28px rgba(0,229,255,0.04);
+      backdrop-filter: blur(7px);
+    }
+
+    .panel::before,
+    .panel::after {
+      content: "";
+      position: absolute;
+      width: 11px;
+      height: 11px;
+    }
+
+    .panel::before {
+      top: -2px;
+      left: -2px;
+      border-top: 2px solid var(--cyan);
+      border-left: 2px solid var(--cyan);
+    }
+
+    .panel::after {
+      right: -2px;
+      bottom: -2px;
+      border-right: 2px solid var(--cyan);
+      border-bottom: 2px solid var(--cyan);
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      padding-bottom: 7px;
+      border-bottom: 1px solid var(--cyan-soft);
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 6px 0;
+      color: #9cebf5;
+      font-size: 10px;
+    }
+
+    .row strong {
+      color: var(--cyan);
+      font-weight: bold;
+    }
+
+    .ok { color: var(--green); }
+    .warn { color: var(--yellow); }
+    .error { color: var(--red); }
+
+    #system-panel {
+      top: 20px;
+      left: 20px;
+      width: 345px;
+    }
+
+    #neural-panel {
+      top: 20px;
+      right: 20px;
+      width: 350px;
+    }
+
+    #comms-panel {
+      left: 20px;
+      bottom: 20px;
+      width: min(560px, calc(100vw - 40px));
+      min-height: 135px;
+    }
+
+    #wave-canvas {
+      display: block;
+      width: 100%;
+      height: 60px;
+      border: 1px solid var(--cyan-soft);
+      background:
+        linear-gradient(rgba(0,229,255,0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.045) 1px, transparent 1px),
+        rgba(0,6,15,0.78);
+      background-size: 16px 16px;
+    }
+
+    #log {
+      max-height: 85px;
+      min-height: 55px;
+      overflow-y: auto;
+      color: var(--white);
+      font-size: 13px;
+      line-height: 1.45;
+      text-shadow: 0 0 7px rgba(0,229,255,0.36);
+      white-space: pre-wrap;
+    }
+
+    #camera-box {
+      position: fixed;
+      z-index: 10;
+      right: 20px;
+      bottom: 20px;
+      width: 195px;
+      height: 145px;
+      overflow: hidden;
+      border: 1px solid var(--cyan);
+      background: #000;
+      box-shadow: 0 0 20px rgba(0,229,255,0.28);
+    }
+
+    #webcam {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      filter: hue-rotate(140deg) saturate(0.82) contrast(1.1);
+      opacity: 0.90;
+    }
+
+    #camera-crosshair {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, transparent 49.5%, rgba(0,229,255,0.55) 50%, transparent 50.5%),
+        linear-gradient(transparent 49.5%, rgba(0,229,255,0.55) 50%, transparent 50.5%);
+    }
+
+    #camera-label {
+      position: absolute;
+      bottom: 5px;
+      left: 5px;
+      padding: 3px 5px;
+      border: 1px solid rgba(0,229,255,0.35);
+      background: rgba(0,0,0,0.78);
+      color: var(--cyan);
+      font-size: 9px;
+    }
+
+    #api-message {
+      position: fixed;
+      z-index: 30;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(470px, calc(100vw - 40px));
+      padding: 8px 12px;
+      border: 1px solid rgba(255,212,82,0.72);
+      background: rgba(31,22,0,0.93);
+      color: var(--yellow);
+      text-align: center;
+      font-size: 11px;
+      letter-spacing: 0.4px;
+    }
+
+    #api-message.hidden { display: none; }
+
+    #footer-help {
+      position: fixed;
+      z-index: 12;
+      left: 50%;
+      bottom: 12px;
+      transform: translateX(-50%);
+      padding: 6px 12px;
+      border: 1px solid rgba(0,229,255,0.22);
+      background: rgba(0,9,18,0.52);
+      color: rgba(200,252,255,0.84);
+      font-size: 9px;
+      letter-spacing: 0.55px;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 900px) {
+      #system-panel, #neural-panel { width: 285px; }
+      #reticle { width: 400px; height: 400px; }
+    }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+
+<body>
+  <div id="background"></div>
+  <div id="scanline"></div>
+  <div id="vignette"></div>
+  <div id="reticle"></div>
+
+  <div id="api-message">
+    Backend not configured. Check API_URL in the code.
+  </div>
+
+  <section class="panel" id="system-panel">
+    <div class="title">
+      <span>J.A.R.V.I.S. MK-XII</span>
+      <span class="ok">● ONLINE</span>
+    </div>
+    <div class="row"><strong>ARC REACTOR</strong><span>MARK 85 CORE</span></div>
+    <div class="row"><strong>OPTICAL SENSOR</strong><span id="hand-status">INITIALIZING</span></div>
+    <div class="row"><strong>HAND CONTROL</strong><span>MOVE / ROTATE / ZOOM</span></div>
+    <div class="row"><strong>VOICE INTERFACE</strong><span id="mic-status">STARTING</span></div>
+    <div class="row"><strong>ACTIVE THEME</strong><span id="theme-name">CYAN</span></div>
+    <div class="row"><strong>AI LINK</strong><span id="network-status">CONNECTED</span></div>
+  </section>
+
+  <section class="panel" id="neural-panel">
+    <div class="title">
+      <span>Neural Mainframe</span>
+      <span id="ai-status">STANDBY</span>
+    </div>
+    <canvas id="wave-canvas"></canvas>
+    <div class="row"><strong>AI ENGINE</strong><span>GROQ BACKEND</span></div>
+    <div class="row"><strong>NETWORK</strong><span id="network-state">READY</span></div>
+    <div class="row"><strong>LATENCY</strong><span id="latency">-- ms</span></div>
+    <div class="row"><strong>VOICE OUTPUT</strong><span id="voice-state">READY</span></div>
+  </section>
+
+  <section class="panel" id="comms-panel">
+    <div class="title">
+      <span>Sub-Vocal Communications</span>
+      <span id="comms-state">AWAITING COMMAND</span>
+    </div>
+    <div id="log">
+      JARVIS interface ready. Ask a question, use your hand to move the hologram, pinch to zoom, or say “red alert”, “blue mode”, “green mode”, “purple mode”, or “gold mode”.
+    </div>
+  </section>
+
+  <section id="camera-box">
+    <video id="webcam" autoplay playsinline muted></video>
+    <div id="camera-crosshair"></div>
+    <div id="camera-label">CAM-01 // GESTURE SENSOR</div>
+  </section>
+
+  <div id="footer-help">
+    OPEN HAND: MOVE + ROTATE &nbsp;|&nbsp; PINCH: ZOOM &nbsp;|&nbsp; VOICE: ASK JARVIS / CHANGE COLOR
+  </div>
+
+  <script>
+    // === BACKEND CONFIG ===
+    const API_URL = "https://jarvisbackend-937m.onrender.com/ask-jarvis";
+    const API_KEY = ""; // key is on the backend, not here
+
+    const el = {
+      apiMessage: document.getElementById("api-message"),
+      handStatus: document.getElementById("hand-status"),
+      micStatus: document.getElementById("mic-status"),
+      networkStatus: document.getElementById("network-status"),
+      networkState: document.getElementById("network-state"),
+      aiStatus: document.getElementById("ai-status"),
+      voiceState: document.getElementById("voice-state"),
+      latency: document.getElementById("latency"),
+      themeName: document.getElementById("theme-name"),
+      commsState: document.getElementById("comms-state"),
+      log: document.getElementById("log"),
+      webcam: document.getElementById("webcam"),
+      wave: document.getElementById("wave-canvas")
+    };
+
+    const state = {
+      color: 0x00e5ff,
+      isThinking: false,
+      isSpeaking: false,
+      targetPosition: new THREE.Vector3(0, 0, 0),
+      targetRotation: new THREE.Vector2(0, 0),
+      targetScale: 1,
+      history: [
+        {
+          role: "system",
+          content: "You are JARVIS, an advanced but friendly personal assistant. Reply clearly, politely, and in no more than three short sentences."
+        }
+      ]
+    };
+
+    function validKey() {
+      return API_URL && API_URL.includes("onrender.com");
+    }
+
+    function log(message) {
+      el.log.textContent = message;
+    }
+
+    function setAIStatus(text, color = "#79e8f5") {
+      el.aiStatus.textContent = text;
+      el.aiStatus.style.color = color;
+    }
+
+    if (validKey()) {
+      el.apiMessage.classList.add("hidden");
+      el.networkStatus.textContent = "KEY DETECTED";
+      el.networkStatus.className = "ok";
+      el.networkState.textContent = "READY";
+      el.networkState.className = "ok";
+      setAIStatus("READY", "#60ff94");
+    } else {
+      setAIStatus("KEY MISSING", "#ffd452");
+    }
+
+    /* VOICE OUTPUT */
+    let chosenVoice = null;
+
+    function loadVoices() {
+      const voices = speechSynthesis.getVoices();
+      chosenVoice =
+        voices.find(v => v.lang === "en-GB" && /male|daniel|george/i.test(v.name)) ||
+        voices.find(v => v.lang === "en-GB") ||
+        voices.find(v => v.lang.startsWith("en")) ||
+        null;
+    }
+
+    if ("speechSynthesis" in window) {
+      loadVoices();
+      speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    function speak(text) {
+      if (!("speechSynthesis" in window)) return;
+
+      speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.04;
+      utterance.pitch = 0.93;
+      if (chosenVoice) utterance.voice = chosenVoice;
+
+      utterance.onstart = () => {
+        state.isSpeaking = true;
+        el.voiceState.textContent = "TRANSMITTING";
+        el.voiceState.className = "ok";
+        el.commsState.textContent = "AUDIO TRANSMISSION";
+      };
+
+      utterance.onend = () => {
+        state.isSpeaking = false;
+        el.voiceState.textContent = "READY";
+        el.voiceState.className = "ok";
+        if (!state.isThinking) el.commsState.textContent = "AWAITING COMMAND";
+      };
+
+      speechSynthesis.speak(utterance);
+    }
+
+    /* COLOR COMMANDS */
+    const themes = {
+      cyan:   { hex: 0x00e5ff, name: "CYAN",   text: "Cyan interface restored." },
+      blue:   { hex: 0x3a8dff, name: "BLUE",   text: "Blue orbital mode enabled." },
+      red:    { hex: 0xff315c, name: "RED",    text: "Red alert protocol engaged." },
+      green:  { hex: 0x60ff94, name: "GREEN",  text: "Green diagnostics mode enabled." },
+      purple: { hex: 0xb05cff, name: "PURPLE", text: "Purple spectral mode enabled." },
+      gold:   { hex: 0xffca4d, name: "GOLD",   text: "Gold command mode enabled." }
+    };
+
+    function applyTheme(theme) {
+      state.color = theme.hex;
+      wireMat.color.setHex(theme.hex);
+      fillMat.color.setHex(theme.hex);
+      particleMat.color.setHex(theme.hex);
+      nodeMat.color.setHex(theme.hex);
+      el.themeName.textContent = theme.name;
+      log("JARVIS: " + theme.text);
+      speak(theme.text);
+    }
+
+    function builtInCommand(text) {
+      const t = text.toLowerCase();
+
+      if (t.includes("red alert") || t.includes("red mode")) { applyTheme(themes.red); return true; }
+      if (t.includes("blue mode")) { applyTheme(themes.blue); return true; }
+      if (t.includes("systems normal") || t.includes("cyan mode")) { applyTheme(themes.cyan); return true; }
+      if (t.includes("green mode")) { applyTheme(themes.green); return true; }
+      if (t.includes("purple mode") || t.includes("violet mode")) { applyTheme(themes.purple); return true; }
+      if (t.includes("gold mode") || t.includes("yellow mode")) { applyTheme(themes.gold); return true; }
+
+      if (t.includes("reset hologram") || t.includes("center hologram")) {
+        state.targetPosition.set(0, 0, 0);
+        state.targetRotation.set(0, 0);
+        state.targetScale = 1;
+        log("JARVIS: Hologram reset complete.");
+        speak("Hologram reset complete.");
+        return true;
+      }
+
+      return false;
+    }
+
+    /* AI BRAIN (calls your backend) */
+    async function askAI(question) {
+      if (!validKey()) {
+        setAIStatus("BACKEND MISSING", "#ffd452");
+        log("SYSTEM: Backend URL not configured correctly.");
+        speak("The backend URL is not configured.");
+        return;
+      }
+
+      if (state.isThinking) return;
+      state.isThinking = true;
+      setAIStatus("THINKING...", "#ffd452");
+      el.commsState.textContent = "NEURAL PROCESSING";
+      log("YOU: " + question + "\n\nJARVIS: Analyzing request...");
+
+      state.history.push({ role: "user", content: question });
+      if (state.history.length > 10) state.history.splice(1, 2);
+
+      const started = performance.now();
+
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: question,
+            history: state.history
+          })
+        });
+
+        const data = await response.json();
+        el.latency.textContent = Math.round(performance.now() - started) + " ms";
+
+        if (!response.ok) {
+          const message = data?.error || "Unknown server error.";
+          setAIStatus("ERROR " + response.status, "#ff315c");
+          el.networkState.textContent = "REQUEST FAILED";
+          el.networkState.className = "error";
+          el.commsState.textContent = "MAINFRAME ERROR";
+          log("BACKEND ERROR " + response.status + ": " + message);
+          return;
+        }
+
+        const answer = data?.answer || "";
+        if (!answer) {
+          setAIStatus("EMPTY RESPONSE", "#ff315c");
+          log("SYSTEM: Backend returned no answer.");
+          return;
+        }
+
+        state.history.push({ role: "assistant", content: answer });
+        setAIStatus("READY", "#60ff94");
+        el.networkState.textContent = "CONNECTED";
+        el.networkState.className = "ok";
+        el.commsState.textContent = "AUDIO TRANSMISSION";
+        log("YOU: " + question + "\n\nJARVIS: " + answer);
+        speak(answer);
+
+      } catch (error) {
+        console.error(error);
+        setAIStatus("NETWORK ERROR", "#ff315c");
+        el.networkState.textContent = "OFFLINE";
+        el.networkState.className = "error";
+        el.commsState.textContent = "LINK FAILURE";
+        log("NETWORK ERROR: " + error.message);
+      } finally {
+        state.isThinking = false;
+      }
+    }
+
+    /* SPEECH RECOGNITION */
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      el.micStatus.textContent = "NOT SUPPORTED";
+      el.micStatus.className = "warn";
+    } else {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = "en-IN";
+
+      recognition.onstart = () => {
+        el.micStatus.textContent = "LISTENING";
+        el.micStatus.className = "ok";
+      };
+
+      recognition.onresult = event => {
+        const text = event.results[event.results.length - 1][0].transcript.trim();
+        if (!text) return;
+        if (builtInCommand(text)) return;
+        askAI(text);
+      };
+
+      recognition.onerror = event => {
+        if (event.error === "not-allowed") {
+          el.micStatus.textContent = "MIC BLOCKED";
+          el.micStatus.className = "error";
+        }
+      };
+
+      recognition.onend = () => {
+        setTimeout(() => {
+          try { recognition.start(); } catch {}
+        }, 350);
+      };
+
+      try { recognition.start(); } catch {}
+    }
+
+    /* THREE.JS HOLOGRAM */
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 1000);
+    camera.position.z = 10.2;
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.domElement.className = "webgl";
+    document.body.appendChild(renderer.domElement);
+
+    const holo = new THREE.Group();
+    scene.add(holo);
+
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: state.color,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.90
+    });
+
+    const fillMat = new THREE.MeshBasicMaterial({
+      color: state.color,
+      transparent: true,
+      opacity: 0.12,
+      blending: THREE.AdditiveBlending
+    });
+
+    const nodeMat = new THREE.MeshBasicMaterial({
+      color: state.color,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending
+    });
+
+    const particleMat = new THREE.PointsMaterial({
+      color: state.color,
+      size: 0.033,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const core = new THREE.Group();
+    holo.add(core);
+
+    const coreOuter = new THREE.Mesh(new THREE.IcosahedronGeometry(1.15, 2), wireMat);
+    const coreInner = new THREE.Mesh(new THREE.DodecahedronGeometry(0.70, 1), fillMat);
+    const coreLight = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 20), nodeMat);
+    core.add(coreOuter, coreInner, coreLight);
+
+    const ring1 = new THREE.Mesh(new THREE.TorusGeometry(1.85, 0.03, 12, 120), wireMat);
+    const ring2 = new THREE.Mesh(new THREE.TorusGeometry(2.35, 0.04, 12, 120), wireMat);
+    const ring3 = new THREE.Mesh(new THREE.TorusGeometry(2.90, 0.025, 12, 120), wireMat);
+    const ring4 = new THREE.Mesh(new THREE.TorusGeometry(3.42, 0.018, 12, 120), wireMat);
+
+    ring2.rotation.x = Math.PI / 2;
+    ring3.rotation.y = Math.PI / 3;
+    ring4.rotation.x = Math.PI / 4;
+    holo.add(ring1, ring2, ring3, ring4);
+
+    const compass = new THREE.Group();
+    holo.add(compass);
+
+    for (let i = 0; i < 36; i++) {
+      const a = i / 36 * Math.PI * 2;
+      const size = i % 3 === 0 ? 0.27 : 0.12;
+
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(Math.cos(a) * 3.75, Math.sin(a) * 3.75, 0),
+        new THREE.Vector3(Math.cos(a) * (3.75 + size), Math.sin(a) * (3.75 + size), 0)
+      ]);
+
+      compass.add(new THREE.Line(
+        geo,
+        new THREE.LineBasicMaterial({
+          color: state.color,
+          transparent: true,
+          opacity: i % 3 === 0 ? 0.85 : 0.40
+        })
+      ));
+    }
+
+    const particleCount = 420;
+    const particleGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+
+    for (let i = 0; i < particleCount; i++) {
+      const radius = 3.9 + Math.random() * 2.2;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+
+      positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = radius * Math.cos(phi);
+      positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+    }
+
+    particleGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const particleField = new THREE.Points(particleGeo, particleMat);
+    holo.add(particleField);
+
+    const satellites = [];
+
+    for (let i = 0; i < 5; i++) {
+      const group = new THREE.Group();
+      const node = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), nodeMat);
+      const orbit = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.012, 8, 30), wireMat);
+
+      orbit.rotation.x = Math.PI / 2;
+      group.add(node, orbit);
+      holo.add(group);
+      satellites.push(group);
+    }
+
+    /* HAND TRACKING */
+    const hands = new Hands({
+      locateFile: file => "https://cdn.jsdelivr.net/npm/@mediapipe/hands/" + file
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.60,
+      minTrackingConfidence: 0.60
+    });
+
+    hands.onResults(results => {
+      const lm = results.multiHandLandmarks?.[0];
+
+      if (!lm) {
+        el.handStatus.textContent = "SEARCHING";
+        el.handStatus.className = "warn";
+        return;
+      }
+
+      el.handStatus.textContent = "TRACKING ACTIVE";
+      el.handStatus.className = "ok";
+
+      const palm = lm[9];
+      const index = lm[8];
+      const thumb = lm[4];
+
+      const x = (palm.x - 0.5) * -5.0;
+      const y = (0.5 - palm.y) * 3.5;
+
+      state.targetPosition.set(x, y, 0);
+      state.targetRotation.set(y * 0.35, x * 0.48);
+
+      const pinch = Math.hypot(index.x - thumb.x, index.y - thumb.y);
+      state.targetScale = THREE.MathUtils.clamp(0.48 + pinch * 8.0, 0.48, 2.9);
+    });
+
+    new Camera(el.webcam, {
+      onFrame: async () => {
+        await hands.send({ image: el.webcam });
+      },
+      width: 640,
+      height: 480
+    }).start();
+
+    /* WAVEFORM */
+    const waveCtx = el.wave.getContext("2d");
+    el.wave.width = 650;
+    el.wave.height = 120;
+    let waveOffset = 0;
+
+    function drawWave() {
+      const w = el.wave.width;
+      const h = el.wave.height;
+      const active = state.isThinking || state.isSpeaking;
+
+      waveCtx.clearRect(0, 0, w, h);
+      waveCtx.strokeStyle = "#" + state.color.toString(16).padStart(6, "0");
+      waveCtx.lineWidth = 2;
+      waveCtx.shadowBlur = 8;
+      waveCtx.shadowColor = waveCtx.strokeStyle;
+      waveCtx.beginPath();
+
+      for (let x = 0; x < w; x++) {
+        const power = active ? 27 : 8;
+        const y = h / 2
+          + Math.sin(x * 0.045 + waveOffset) * power
+          + Math.sin(x * 0.11 - waveOffset * 1.5) * (active ? 9 : 2);
+
+        if (x === 0) waveCtx.moveTo(x, y);
+        else waveCtx.lineTo(x, y);
+      }
+
+      waveCtx.stroke();
+      waveCtx.shadowBlur = 0;
+      waveOffset += active ? 0.18 : 0.055;
+    }
+
+    /* ANIMATION */
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+
+      holo.position.lerp(state.targetPosition, 0.075);
+      holo.rotation.x += (state.targetRotation.x - holo.rotation.x) * 0.075;
+      holo.rotation.y += (state.targetRotation.y - holo.rotation.y) * 0.075;
+
+      const nextScale = holo.scale.x + (state.targetScale - holo.scale.x) * 0.085;
+      holo.scale.setScalar(nextScale);
+
+      coreOuter.rotation.x += 0.004;
+      coreOuter.rotation.y += 0.007;
+      coreInner.rotation.y -= 0.006;
+      coreLight.scale.setScalar(1 + Math.sin(t * 4) * 0.13);
+
+      ring1.rotation.z += 0.012;
+      ring2.rotation.y -= 0.009;
+      ring3.rotation.x += 0.006;
+      ring4.rotation.z -= 0.003;
+      compass.rotation.z -= 0.002;
+      particleField.rotation.y -= 0.0014;
+
+      satellites.forEach((sat, i) => {
+        const angle = t * (0.55 + i * 0.045) + i * (Math.PI * 2 / satellites.length);
+        const radius = 3.05 + (i % 2) * 0.52;
+
+        sat.position.set(
+          Math.cos(angle) * radius,
+          Math.sin(angle * 1.4) * 1.1,
+          Math.sin(angle) * 0.90
+        );
+
+        sat.rotation.x += 0.016;
+        sat.rotation.y += 0.021;
+      });
+
+      drawWave();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    addEventListener("resize", () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>
